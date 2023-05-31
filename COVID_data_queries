@@ -1,0 +1,109 @@
+-- ******** Previewing the data **********
+--Deaths
+SELECT * 
+FROM `portfolio-project-387922.CovidData.CovidDeaths` 
+WHERE continent is not NULL
+ORDER BY 3,4
+LIMIT 1000
+
+-- Vaccinations
+SELECT * 
+FROM `portfolio-project-387922.CovidData.CovidVaccinations` 
+ORDER BY 3,4
+LIMIT 1000
+
+-- Select the data that will be used
+
+SELECT location, date, total_cases, new_cases, total_deaths, population
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+ORDER BY 1,2
+
+-- Total Cases vs Total Deaths (in the United States)
+-- Probability of death once infected with COVID
+
+SELECT location, date, total_cases, total_deaths, (total_deaths/total_cases) * 100 as DeathPercentage
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE location = "United States"
+ORDER BY 1,2
+
+-- Total Cases vs Population
+
+SELECT location, date, population, total_cases, SAFE_DIVIDE(CAST(total_cases as DECIMAL),CAST(population as DECIMAL))*100 as InfectionPercentage
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE location = "United States"
+ORDER BY 1,2
+
+-- Countries w/ Highest infection rate vs. population
+SELECT location, population, MAX(total_cases) as HighestInfectionCount, MAX(SAFE_DIVIDE(CAST(total_cases as DECIMAL),CAST(population as DECIMAL)))*100 as HighestInfectionPercentage
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+GROUP BY population, location
+ORDER BY HighestInfectionPercentage DESC
+
+--Countries w/ Highest death count vs. population
+SELECT location, MAX(CAST(total_deaths as int)) as TotalDeathCount
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE continent is not NULL --This will filter out the other locale measures (World, continents)
+GROUP BY location
+ORDER BY TotalDeathCount DESC
+
+--Do the same by continent, for posterity
+SELECT location, MAX(CAST(total_deaths as int)) as TotalDeathCount
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE continent is NULL 
+GROUP BY location
+ORDER BY TotalDeathCount DESC
+
+-- **********Global Numbers*********
+
+-- Death rate from infection per given day globally
+SELECT date, SUM(new_cases) as TOTAL_CASES, SUM(new_deaths) as TOTAL_DEATHS, SAFE_DIVIDE(SUM(new_deaths),SUM(new_cases))*100 as DeathPercentage
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE continent is not NULL
+GROUP BY date
+ORDER BY 1,2
+
+-- Overall global death rate
+SELECT SUM(new_cases) as TOTAL_CASES, SUM(new_deaths) as TOTAL_DEATHS, SAFE_DIVIDE(SUM(new_deaths),SUM(new_cases))*100 as DeathPercentage
+FROM `portfolio-project-387922.CovidData.CovidDeaths`
+WHERE continent is not NULL
+ORDER BY 1,2
+
+-- Join the deaths and vaccination tables
+SELECT *
+FROM `portfolio-project-387922.CovidData.CovidDeaths` as DEA
+JOIN `portfolio-project-387922.CovidData.CovidVaccinations` as VAC
+  ON DEA.location = VAC.location
+  AND DEA.date = VAC.date
+
+-- Looking for total population vs Vaccinations
+SELECT DEA.continent, DEA.location, DEA.date, DEA.population, VAC.new_vaccinations
+FROM `portfolio-project-387922.CovidData.CovidDeaths` as DEA
+JOIN `portfolio-project-387922.CovidData.CovidVaccinations` as VAC
+  ON DEA.location = VAC.location
+  AND DEA.date = VAC.date
+WHERE DEA.continent is not NULL
+ORDER BY 2,3
+
+-- Add in a rolling count of total vaccinations per location
+SELECT DEA.continent, DEA.location, DEA.date, DEA.population, VAC.new_vaccinations, SUM(VAC.new_vaccinations) OVER (PARTITION BY DEA.location ORDER BY DEA.location, DEA.date) as rolling_total_count
+FROM `portfolio-project-387922.CovidData.CovidDeaths` as DEA
+JOIN `portfolio-project-387922.CovidData.CovidVaccinations` as VAC
+  ON DEA.location = VAC.location
+  AND DEA.date = VAC.date
+WHERE DEA.continent is not NULL
+ORDER BY 2,3
+
+-- Next, add in a measure of percentage of a country's population vs vaccinated individuals
+WITH VacPer --Create a CTE containing the joined tables. We need this because we can't use a measure generated in the SELECT statement (rolling_count_total/population)
+as
+(
+SELECT DEA.continent, DEA.location, DEA.date, DEA.population, VAC.new_vaccinations, SUM(VAC.new_vaccinations) OVER (PARTITION BY DEA.location ORDER BY DEA.location, DEA.date) as rolling_total_count
+FROM `portfolio-project-387922.CovidData.CovidDeaths` as DEA
+JOIN `portfolio-project-387922.CovidData.CovidVaccinations` as VAC
+  ON DEA.location = VAC.location
+  AND DEA.date = VAC.date
+WHERE DEA.continent is not NULL
+)
+SELECT continent, location, date, population, new_vaccinations, rolling_total_count, SAFE_DIVIDE(rolling_total_count, population) as vaccinated_percentage
+FROM VacPer
+
